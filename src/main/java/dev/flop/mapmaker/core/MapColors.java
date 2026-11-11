@@ -79,6 +79,30 @@ public final class MapColors {
         e(61, 127, 167, 150, "verdant_froglight")
     );
 
+    /** Carpet mode: the 16 wool carpets (same map colours as concrete), each sitting on a support block. */
+    public static final List<Entry> CARPETS = List.of(
+        e(8, 255, 255, 255, "white_carpet"),
+        e(15, 216, 127, 51, "orange_carpet"),
+        e(16, 178, 76, 216, "magenta_carpet"),
+        e(17, 102, 153, 216, "light_blue_carpet"),
+        e(18, 229, 229, 51, "yellow_carpet"),
+        e(19, 127, 204, 25, "lime_carpet"),
+        e(20, 242, 127, 165, "pink_carpet"),
+        e(21, 76, 76, 76, "gray_carpet"),
+        e(22, 153, 153, 153, "light_gray_carpet"),
+        e(23, 76, 127, 153, "cyan_carpet"),
+        e(24, 127, 63, 178, "purple_carpet"),
+        e(25, 51, 76, 178, "blue_carpet"),
+        e(26, 102, 76, 51, "brown_carpet"),
+        e(27, 102, 127, 51, "green_carpet"),
+        e(28, 153, 51, 51, "red_carpet"),
+        e(29, 25, 25, 25, "black_carpet")
+    );
+
+    public static final String SUPPORT_BLOCK = "minecraft:cobblestone";
+
+    public static List<Entry> palette(boolean carpets) { return carpets ? CARPETS : ENTRIES; }
+
     private static Entry e(int id, int r, int g, int b, String block) {
         return new Entry(id, r, g, b, "minecraft:" + block, "");
     }

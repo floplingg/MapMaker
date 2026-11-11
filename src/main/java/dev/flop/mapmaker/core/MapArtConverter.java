@@ -11,7 +11,7 @@ public final class MapArtConverter {
 
     public enum Fit { CROP, STRETCH }
 
-    public record Settings(int mapsWide, int mapsTall, boolean staircase, boolean dither, Fit fit) {
+    public record Settings(int mapsWide, int mapsTall, boolean staircase, boolean dither, Fit fit, boolean carpets) {
         public int width() { return mapsWide * 128; }
         public int height() { return mapsTall * 128; }
     }
@@ -19,6 +19,7 @@ public final class MapArtConverter {
     /** Result: colour entry index + shade per pixel, the preview colours, and block heights. */
     public static final class Result {
         public final int width, height;
+        public final boolean carpets;
         public final int[] entry;   // index into MapColors.ENTRIES, [z * width + x]
         public final int[] shade;   // 0/1/2
         public final int[] preview; // RGB the map will actually show
@@ -26,8 +27,8 @@ public final class MapArtConverter {
         public final int[] nooblineY; // height of the support row north of each column
         public int maxY;
 
-        Result(int w, int h) {
-            width = w; height = h;
+        Result(int w, int h, boolean carpets) {
+            width = w; height = h; this.carpets = carpets;
             entry = new int[w * h]; shade = new int[w * h]; preview = new int[w * h];
             y = new int[w * h]; nooblineY = new int[w];
         }
@@ -36,13 +37,13 @@ public final class MapArtConverter {
     // ---------- candidate colours (precomputed in Lab) ----------
     private record Cand(int entry, int shade, int rgb, double L, double A, double B) {}
 
-    private static Cand[] candidates(boolean staircase) {
+    private static Cand[] candidates(boolean staircase, java.util.List<MapColors.Entry> pal) {
         int[] shades = staircase ? new int[]{0, 1, 2} : new int[]{1};
-        Cand[] out = new Cand[MapColors.ENTRIES.size() * shades.length];
+        Cand[] out = new Cand[pal.size() * shades.length];
         int i = 0;
-        for (int ei = 0; ei < MapColors.ENTRIES.size(); ei++) {
+        for (int ei = 0; ei < pal.size(); ei++) {
             for (int s : shades) {
-                int rgb = MapColors.shadedRgb(MapColors.ENTRIES.get(ei), s);
+                int rgb = MapColors.shadedRgb(pal.get(ei), s);
                 double[] lab = lab((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
                 out[i++] = new Cand(ei, s, rgb, lab[0], lab[1], lab[2]);
             }
@@ -53,9 +54,9 @@ public final class MapArtConverter {
     public static Result convert(BufferedImage src, Settings s) {
         int w = s.width(), h = s.height();
         int[] px = resize(src, w, h, s.fit());
-        Cand[] cands = candidates(s.staircase());
+        Cand[] cands = candidates(s.staircase(), MapColors.palette(s.carpets()));
         Map<Integer, Cand> cache = new HashMap<>();
-        Result res = new Result(w, h);
+        Result res = new Result(w, h, s.carpets());
 
         float[] r = new float[w * h], g = new float[w * h], b = new float[w * h];
         for (int i = 0; i < px.length; i++) {

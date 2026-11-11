@@ -27,28 +27,32 @@ public final class StructureWriter {
 
     public static Summary write(MapArtConverter.Result res, Path file) throws IOException {
         int w = res.width, h = res.height;
+        java.util.List<MapColors.Entry> pal = MapColors.palette(res.carpets);
+        int lift = res.carpets ? 1 : 0; // carpets sit one block up, on a support block
 
         // palette: state index per colour entry, plus the noobline block
         List<String[]> palette = new ArrayList<>();
-        int[] stateOf = new int[MapColors.ENTRIES.size()];
+        int[] stateOf = new int[pal.size()];
         java.util.Arrays.fill(stateOf, -1);
         Map<String, Integer> materials = new LinkedHashMap<>();
         for (int i = 0; i < w * h; i++) {
             int e = res.entry[i];
             if (stateOf[e] < 0) {
-                MapColors.Entry en = MapColors.ENTRIES.get(e);
+                MapColors.Entry en = pal.get(e);
                 stateOf[e] = palette.size();
                 palette.add(new String[]{en.block(), en.props()});
             }
-            materials.merge(MapColors.ENTRIES.get(e).block(), 1, Integer::sum);
+            materials.merge(pal.get(e).block(), 1, Integer::sum);
         }
         int noobState = -1;
         for (int p = 0; p < palette.size(); p++) if (palette.get(p)[0].equals(MapColors.NOOBLINE_BLOCK)) noobState = p;
         if (noobState < 0) { noobState = palette.size(); palette.add(new String[]{MapColors.NOOBLINE_BLOCK, ""}); }
         materials.merge(MapColors.NOOBLINE_BLOCK, w, Integer::sum);
+        int supportState = noobState; // support and noobline are both cobblestone
+        if (res.carpets) materials.merge(MapColors.SUPPORT_BLOCK, w * h + w, Integer::sum);
 
-        int total = w * h + w;
-        int sizeY = res.maxY + 1, sizeZ = h + 1;
+        int total = (w * h + w) * (res.carpets ? 2 : 1);
+        int sizeY = res.maxY + 1 + lift, sizeZ = h + 1;
 
         file = file.toAbsolutePath();
         Files.createDirectories(file.getParent());
@@ -77,11 +81,15 @@ public final class StructureWriter {
             }
 
             out.writeByte(9); str(out, "blocks"); out.writeByte(10); out.writeInt(total);
-            for (int x = 0; x < w; x++) block(out, x, res.nooblineY[x], 0, noobState);
+            for (int x = 0; x < w; x++) {
+                if (res.carpets) block(out, x, res.nooblineY[x], 0, supportState);
+                block(out, x, res.nooblineY[x] + lift, 0, noobState);
+            }
             for (int z = 0; z < h; z++) {
                 for (int x = 0; x < w; x++) {
                     int i = z * w + x;
-                    block(out, x, res.y[i], z + 1, stateOf[res.entry[i]]);
+                    if (res.carpets) block(out, x, res.y[i], z + 1, supportState);
+                    block(out, x, res.y[i] + lift, z + 1, stateOf[res.entry[i]]);
                 }
             }
 

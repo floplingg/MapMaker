@@ -17,17 +17,18 @@ import net.minecraft.resources.Identifier;
 public class MapMakerClient implements ClientModInitializer {
 
     public static final String MOD_ID = "mapmaker";
+    public static KeyMapping openKey;
 
     @Override
     public void onInitializeClient() {
         ImageSources.enableAwtClipboard();
 
         KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
-        KeyMapping open = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+        openKey = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.mapmaker.open", InputConstants.Type.KEYSYM, InputConstants.KEY_J, category));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (open.consumeClick()) {
+            while (openKey.consumeClick()) {
                 if (!(client.screen instanceof MapMakerScreen)) client.setScreen(new MapMakerScreen(client.screen));
             }
         });

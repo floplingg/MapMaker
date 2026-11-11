@@ -9,7 +9,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.fabricmc.loader.api.FabricLoader;
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -24,7 +26,7 @@ public class MapMakerScreen extends Screen {
 
     // Settings persist while the game is open
     private static int mapsWide = 1, mapsTall = 1;
-    private static boolean staircase = false, dither = true;
+    private static boolean staircase = false, dither = true, carpets = false;
     private static MapArtConverter.Fit fit = MapArtConverter.Fit.CROP;
     private static final int MAX_MAPS = 8;
 
@@ -43,7 +45,8 @@ public class MapMakerScreen extends Screen {
     private static final AtomicInteger GENERATION = new AtomicInteger();
 
     private final Screen parent;
-    private Button widthBtn, heightBtn, modeBtn, ditherBtn, fitBtn;
+    private Button widthBtn, heightBtn, modeBtn, ditherBtn, fitBtn, materialBtn, keyBtn;
+    private boolean listeningForKey;
     private boolean pasteHeld;
 
     /** Downsampled preview pixels (ARGB). Uploaded once to a GPU texture, then drawn as one image. */
@@ -96,6 +99,10 @@ public class MapMakerScreen extends Screen {
         }).bounds(x + 82, y, 78, 20).build());
         y += row;
 
+        materialBtn = addRenderableWidget(Button.builder(Component.empty(), b -> { carpets = !carpets; changed(); }).bounds(x, y, 78, 20).build());
+        keyBtn = addRenderableWidget(Button.builder(Component.empty(), b -> { listeningForKey = true; refreshLabels(); }).bounds(x + 82, y, 78, 20).build());
+        y += row;
+
         addRenderableWidget(Button.builder(Component.literal("Open schematics folder"), b -> {
             try { Files.createDirectories(schematicsDir()); } catch (Exception ignored) {}
             openFolder(schematicsDir());
@@ -115,6 +122,9 @@ public class MapMakerScreen extends Screen {
         heightBtn.setMessage(Component.literal("Height: " + mapsTall + (mapsTall == 1 ? " map" : " maps") + " (" + mapsTall * 128 + ")"));
         modeBtn.setMessage(Component.literal("Mode: " + (staircase ? "Staircase (3 shades)" : "Flat")));
         ditherBtn.setMessage(Component.literal("Dither: " + (dither ? "On" : "Off")));
+        materialBtn.setMessage(Component.literal(carpets ? "Carpets" : "Blocks"));
+        keyBtn.setMessage(listeningForKey ? Component.literal("> press a key <")
+                : Component.literal("Key: ").append(MapMakerClient.openKey.getTranslatedKeyMessage()));
         fitBtn.setMessage(Component.literal("Fit: " + (fit == MapArtConverter.Fit.CROP ? "Crop" : "Stretch")));
     }
 
@@ -128,6 +138,18 @@ public class MapMakerScreen extends Screen {
     public void tick() {
         long win = GLFW.glfwGetCurrentContext();
         if (win == 0) return;
+        if (listeningForKey) {
+            for (int k = GLFW.GLFW_KEY_SPACE; k <= GLFW.GLFW_KEY_LAST; k++) {
+                if (k == GLFW.GLFW_KEY_ESCAPE || GLFW.glfwGetKey(win, k) != GLFW.GLFW_PRESS) continue;
+                MapMakerClient.openKey.setKey(InputConstants.Type.KEYSYM.getOrCreate(k));
+                KeyMapping.resetMapping();
+                this.minecraft.options.save();
+                listeningForKey = false;
+                refreshLabels();
+                break;
+            }
+            return;
+        }
         boolean mod = ImageSources.MAC
                 ? GLFW.glfwGetKey(win, GLFW.GLFW_KEY_LEFT_SUPER) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(win, GLFW.GLFW_KEY_RIGHT_SUPER) == GLFW.GLFW_PRESS
                 : GLFW.glfwGetKey(win, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(win, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
@@ -182,7 +204,7 @@ public class MapMakerScreen extends Screen {
         final int gen = GENERATION.incrementAndGet();
         final ImageSources.Loaded img = image;
         final String name = outName;
-        final MapArtConverter.Settings s = new MapArtConverter.Settings(mapsWide, mapsTall, staircase, dither, fit);
+        final MapArtConverter.Settings s = new MapArtConverter.Settings(mapsWide, mapsTall, staircase, dither, fit, carpets);
         setStatus("Converting " + s.width() + "x" + s.height() + "...", "", 0xFFAAAAAA);
         WORKER.execute(() -> {
             if (gen != GENERATION.get()) return; // a newer request is queued
@@ -192,7 +214,7 @@ public class MapMakerScreen extends Screen {
                 if (gen != GENERATION.get()) return;
                 Path file = schematicsDir().resolve(name + ".nbt");
                 StructureWriter.Summary sum = StructureWriter.write(r, file);
-                String shape = s.width() + "x" + s.height() + (s.staircase() ? " staircase, " + sum.sizeY() + " tall" : " flat");
+                String shape = s.width() + "x" + s.height() + (s.carpets() ? " carpet" : "") + (s.staircase() ? " staircase, " + sum.sizeY() + " tall" : " flat");
                 setStatus("Saved " + name + ".nbt  (" + shape + ")",
                         String.format("%,d blocks, %d kinds - open it in Litematica", sum.blocks(), sum.materials().size()),
                         0xFF55FF55);
