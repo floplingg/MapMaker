@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "mapmaker",
+  "version": "${version}",
+  "name": "MapMaker",
+  "description": "Paste, upload or drop an image and get a ready-to-build map art schematic in your Litematica folder. No setup, no material picking.",
+  "authors": ["floplingg"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.flop.mapmaker.MapMakerClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  },
+  "suggests": { "litematica": "*" }
+}
