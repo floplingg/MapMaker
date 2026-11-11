@@ -9,7 +9,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.fabricmc.loader.api.FabricLoader;
+import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -41,8 +46,12 @@ public class MapMakerScreen extends Screen {
     private Button widthBtn, heightBtn, modeBtn, ditherBtn, fitBtn;
     private boolean pasteHeld;
 
-    /** Downsampled preview stored as horizontal runs (x0, x1, argb) per row, so drawing stays cheap. */
-    private record Preview(int cols, int rows, int[][] runs) {}
+    /** Downsampled preview pixels (ARGB). Uploaded once to a GPU texture, then drawn as one image. */
+    private record Preview(int cols, int rows, int[] argb) {}
+
+    private static final Identifier PREVIEW_TEX = Identifier.fromNamespaceAndPath("mapmaker", "preview");
+    private static DynamicTexture texture;
+    private static Preview uploaded;
 
     public MapMakerScreen(Screen parent) {
         super(Component.literal("MapMaker"));
@@ -196,18 +205,28 @@ public class MapMakerScreen extends Screen {
     private static Preview buildPreview(MapArtConverter.Result r, int maxCells) {
         int stride = Math.max(1, (int) Math.ceil(Math.max(r.width, r.height) / (double) maxCells));
         int cols = r.width / stride, rows = r.height / stride;
-        int[][] runs = new int[rows][];
-        int[] tmp = new int[cols * 3];
-        for (int z = 0; z < rows; z++) {
-            int n = 0, start = 0, cur = 0;
-            for (int x = 0; x <= cols; x++) {
-                int c = x < cols ? 0xFF000000 | r.preview[(z * stride) * r.width + x * stride] : 0;
-                if (x == 0) { cur = c; continue; }
-                if (c != cur) { tmp[n++] = start; tmp[n++] = x; tmp[n++] = cur; start = x; cur = c; }
-            }
-            runs[z] = java.util.Arrays.copyOf(tmp, n);
+        int[] argb = new int[cols * rows];
+        for (int z = 0; z < rows; z++)
+            for (int x = 0; x < cols; x++)
+                argb[z * cols + x] = 0xFF000000 | r.preview[(z * stride) * r.width + x * stride];
+        return new Preview(cols, rows, argb);
+    }
+
+    /** Render thread only: push a new preview to the GPU (only when it changed). */
+    private static void uploadIfNeeded(Preview p) {
+        if (p == uploaded) return;
+        if (texture == null || texture.getPixels() == null
+                || texture.getPixels().getWidth() != p.cols() || texture.getPixels().getHeight() != p.rows()) {
+            if (texture != null) texture.close();
+            texture = new DynamicTexture(() -> "mapmaker preview", new NativeImage(p.cols(), p.rows(), false));
+            Minecraft.getInstance().getTextureManager().register(PREVIEW_TEX, texture);
         }
-        return new Preview(cols, rows, runs);
+        NativeImage img = texture.getPixels();
+        for (int z = 0; z < p.rows(); z++)
+            for (int x = 0; x < p.cols(); x++)
+                img.setPixel(x, z, p.argb()[z * p.cols() + x]);
+        texture.upload();
+        uploaded = p;
     }
 
     private static void openFolder(Path dir) {
@@ -235,15 +254,11 @@ public class MapMakerScreen extends Screen {
 
         Preview p = preview;
         if (p != null && image != null) {
+            uploadIfNeeded(p);
             int cell = Math.max(1, B / Math.max(p.cols(), p.rows()));
-            int ox = bx + (B - p.cols() * cell) / 2, oy = by + (B - p.rows() * cell) / 2;
-            for (int z = 0; z < p.rows(); z++) {
-                int[] run = p.runs()[z];
-                int y0 = oy + z * cell;
-                for (int i = 0; i < run.length; i += 3) {
-                    g.fill(ox + run[i] * cell, y0, ox + run[i + 1] * cell, y0 + cell, run[i + 2]);
-                }
-            }
+            int dw = p.cols() * cell, dh = p.rows() * cell;
+            int ox = bx + (B - dw) / 2, oy = by + (B - dh) / 2;
+            g.blit(RenderPipelines.GUI_TEXTURED, PREVIEW_TEX, ox, oy, 0f, 0f, dw, dh, p.cols(), p.rows(), p.cols(), p.rows());
         } else {
             g.drawCenteredString(this.font, "Drop an image here", bx + B / 2, by + B / 2 - 10, 0xFF888888);
             g.drawCenteredString(this.font, "or press " + (ImageSources.MAC ? "Cmd" : "Ctrl") + "+V", bx + B / 2, by + B / 2 + 2, 0xFF888888);
