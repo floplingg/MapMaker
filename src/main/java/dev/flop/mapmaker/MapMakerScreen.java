@@ -9,7 +9,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -90,7 +89,7 @@ public class MapMakerScreen extends Screen {
 
         addRenderableWidget(Button.builder(Component.literal("Open schematics folder"), b -> {
             try { Files.createDirectories(schematicsDir()); } catch (Exception ignored) {}
-            Util.getPlatform().openPath(schematicsDir());
+            openFolder(schematicsDir());
         }).bounds(x, y, w, 20).build());
         y += row;
 
@@ -209,6 +208,15 @@ public class MapMakerScreen extends Screen {
             runs[z] = java.util.Arrays.copyOf(tmp, n);
         }
         return new Preview(cols, rows, runs);
+    }
+
+    private static void openFolder(Path dir) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        String[] cmd = os.contains("win") ? new String[]{"explorer", dir.toAbsolutePath().toString()}
+                : os.contains("mac") ? new String[]{"open", dir.toAbsolutePath().toString()}
+                : new String[]{"xdg-open", dir.toAbsolutePath().toString()};
+        try { new ProcessBuilder(cmd).start(); }
+        catch (Exception e) { setStatus("Couldn't open the folder", dir.toAbsolutePath().toString(), 0xFFFF5555); }
     }
 
     private static void setStatus(String a, String b, int color) {
