@@ -8,6 +8,7 @@ Fabric 1.21.11 client mod. Paste, upload or drag an image in and it becomes a ma
 - **Ctrl+V** (Cmd+V on Mac) or **Paste** — works with a copied image, a copied file, a file path, or an image link.
 - **Upload...** opens a file picker. You can also **drag an image onto the window**.
 - It converts and saves instantly as `schematics/mapart_<name>.nbt`. Changing a setting re-saves the same file.
+- Type in the **name box** to name the schematic. It renames the file a second after you stop typing (or when you close the menu). Type a name before adding an image and it uses that.
 
 Defaults: **1x1 map (128x128), Flat, Dither on, Crop to fill.**
 - Width/Height: 1-8 maps each (128 to 1024 blocks).

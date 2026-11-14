@@ -18,6 +18,7 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
@@ -33,6 +34,11 @@ public class MapMakerScreen extends Screen {
     // Last image also persists, so reopening the menu keeps your work
     private static ImageSources.Loaded image;
     private static String outName;
+    // Name box: what the user typed, and whether it still needs applying
+    private static String nameText = "";
+    private static boolean nameTyped;          // typed since the last image was loaded
+    private static volatile boolean nameNeedsRefresh;
+    private static final int MAX_NAME = 64;
     private static volatile Preview preview;
     private static volatile String status = "", status2 = "";
     private static volatile int statusColor = 0xFFAAAAAA;
@@ -47,6 +53,10 @@ public class MapMakerScreen extends Screen {
     private final Screen parent;
     private Button widthBtn, heightBtn, modeBtn, ditherBtn, fitBtn, materialBtn, keyBtn;
     private boolean listeningForKey;
+    private EditBox nameBox;
+    private boolean suppressNameEvents;
+    private int ticks, lastNameEdit = -1;
+    private int columnBottom;
     private boolean pasteHeld;
 
     /** Downsampled preview pixels (ARGB). Uploaded once to a GPU texture, then drawn as one image. */
@@ -80,6 +90,19 @@ public class MapMakerScreen extends Screen {
                 .bounds(x + 82, y, 78, 20).build());
         y += row;
 
+        nameBox = new EditBox(this.font, x + 1, y + 1, w - 2, 18, Component.literal("Schematic name"));
+        nameBox.setMaxLength(MAX_NAME);
+        nameBox.setHint(Component.literal("Schematic name (optional)"));
+        nameBox.setValue(nameText);
+        nameBox.setResponder(text -> {
+            if (suppressNameEvents) return;
+            nameText = text;
+            nameTyped = true;
+            lastNameEdit = ticks;
+        });
+        addRenderableWidget(nameBox);
+        y += row;
+
         addRenderableWidget(Button.builder(Component.literal("-"), b -> { mapsWide = Math.max(1, mapsWide - 1); changed(); }).bounds(x, y, 20, 20).build());
         widthBtn = addRenderableWidget(Button.builder(Component.empty(), b -> { mapsWide = mapsWide % MAX_MAPS + 1; changed(); }).bounds(x + 22, y, w - 44, 20).build());
         addRenderableWidget(Button.builder(Component.literal("+"), b -> { mapsWide = Math.min(MAX_MAPS, mapsWide + 1); changed(); }).bounds(x + w - 20, y, 20, 20).build());
@@ -110,6 +133,7 @@ public class MapMakerScreen extends Screen {
         y += row;
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose()).bounds(x, y, w, 20).build());
+        columnBottom = y + 20;
 
         refreshLabels();
         if (image == null && status.isEmpty()) {
@@ -136,6 +160,16 @@ public class MapMakerScreen extends Screen {
     // ---------------------------------------------------------------- input
     @Override
     public void tick() {
+        ticks++;
+        if (nameNeedsRefresh) { // a new image picked its own name: show it in the box
+            nameNeedsRefresh = false;
+            suppressNameEvents = true;
+            nameBox.setValue(nameText);
+            suppressNameEvents = false;
+        }
+        // apply a typed name once you stop typing for about a second
+        if (lastNameEdit >= 0 && ticks - lastNameEdit >= 20) { lastNameEdit = -1; applyName(); }
+
         long win = GLFW.glfwGetCurrentContext();
         if (win == 0) return;
         if (listeningForKey) {
@@ -154,7 +188,7 @@ public class MapMakerScreen extends Screen {
                 ? GLFW.glfwGetKey(win, GLFW.GLFW_KEY_LEFT_SUPER) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(win, GLFW.GLFW_KEY_RIGHT_SUPER) == GLFW.GLFW_PRESS
                 : GLFW.glfwGetKey(win, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(win, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
         boolean v = GLFW.glfwGetKey(win, GLFW.GLFW_KEY_V) == GLFW.GLFW_PRESS;
-        boolean down = mod && v;
+        boolean down = mod && v && !nameBox.isFocused(); // Ctrl+V in the name box pastes text instead
         if (down && !pasteHeld) paste();
         pasteHeld = down;
     }
@@ -191,13 +225,53 @@ public class MapMakerScreen extends Screen {
     // ---------------------------------------------------------------- work
     private static synchronized void load(ImageSources.Loaded l) {
         image = l;
-        String base = l.name().replaceAll("\\.[A-Za-z0-9]{2,5}$", "").replaceAll("[^A-Za-z0-9_-]+", "_");
-        if (base.isBlank() || base.equals("pasted") || base.equals("_")) base = "pasted_" + System.currentTimeMillis() / 1000;
-        base = "mapart_" + base;
+        String typed = cleanName(nameText);
+        String base;
+        if (nameTyped && !typed.isEmpty()) {
+            base = typed; // you named it before adding the image
+        } else {
+            base = l.name().replaceAll("\\.[A-Za-z0-9]{2,5}$", "").replaceAll("[^A-Za-z0-9_-]+", "_");
+            if (base.isBlank() || base.equals("pasted") || base.equals("_")) base = "pasted_" + System.currentTimeMillis() / 1000;
+            base = "mapart_" + base;
+        }
         String name = base;
         for (int i = 2; Files.exists(schematicsDir().resolve(name + ".nbt")); i++) name = base + "_" + i;
         outName = name;
+        nameText = name;
+        nameTyped = false;
+        nameNeedsRefresh = true;
         convertAndSave();
+    }
+
+    /** File-safe version of a typed name ("" if nothing usable). Spaces are fine; path characters are not. */
+    private static String cleanName(String raw) {
+        String n = raw == null ? "" : raw.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        if (n.toLowerCase().endsWith(".nbt")) n = n.substring(0, n.length() - 4).trim();
+        n = n.replaceAll("[. ]+$", "");
+        return n.length() > MAX_NAME ? n.substring(0, MAX_NAME) : n;
+    }
+
+    /** Rename the current schematic to whatever is in the name box. */
+    private static synchronized void applyName() {
+        String wanted = cleanName(nameText);
+        if (image == null || outName == null || wanted.isEmpty() || wanted.equals(outName)) return;
+        Path target = schematicsDir().resolve(wanted + ".nbt");
+        if (Files.exists(target)) {
+            setStatus("\"" + wanted + "\" already exists", "Pick another name - your other schematic wasn't touched.", 0xFFFF5555);
+            return;
+        }
+        final String old = outName;
+        outName = wanted;
+        nameTyped = false;
+        WORKER.execute(() -> { // same thread as saving, so it can't clash with a save in progress
+            try {
+                Path from = schematicsDir().resolve(old + ".nbt");
+                if (Files.exists(from)) Files.move(from, target);
+                setStatus("Renamed to " + wanted + ".nbt", "It's in your schematics folder.", 0xFF55FF55);
+            } catch (Exception e) {
+                setStatus("Couldn't rename", String.valueOf(e.getMessage()), 0xFFFF5555);
+            }
+        });
     }
 
     private static void convertAndSave() {
@@ -286,13 +360,14 @@ public class MapMakerScreen extends Screen {
             g.drawCenteredString(this.font, "or press " + (ImageSources.MAC ? "Cmd" : "Ctrl") + "+V", bx + B / 2, by + B / 2 + 2, 0xFF888888);
         }
 
-        int ty = by + B + 8;
+        int ty = Math.max(by + B, columnBottom) + 8;
         g.drawCenteredString(this.font, status, this.width / 2, ty, statusColor);
         if (!status2.isEmpty()) g.drawCenteredString(this.font, status2, this.width / 2, ty + 11, 0xFFAAAAAA);
     }
 
     @Override
     public void onClose() {
+        if (lastNameEdit >= 0) { lastNameEdit = -1; applyName(); }
         this.minecraft.setScreen(parent);
     }
 }
